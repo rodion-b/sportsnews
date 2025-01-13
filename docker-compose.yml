@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+    environment:
+      HTTP_ADDR: ":8080"
+      MONGO_URI: "mongodb://admin:password@mongodb:27017" # Connection string to MongoDB
+      MONGO_DATABASE_NAME: "admin" # MongoDB database name
+    command: ["./app"]
+    depends_on:
+      - mongodb # Ensures MongoDB starts before the app
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongo_container
+    ports:
+      - "27017:27017" # Expose MongoDB port
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin # MongoDB admin username
+      MONGO_INITDB_ROOT_PASSWORD: password # MongoDB admin password
+    volumes:
+      - ./data:/data/db # Persistent data storage
+
