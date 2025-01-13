@@ -1,6 +1,6 @@
-# Sports News  API
+# Sports News Service
 
-This is a simple Sports News Service that continously polls latest ECB articles and persists them into mongodb. It also provides a REST API with ecb articles data in consistent and desirable format for upstream apps that can be acessed in case the ECB server is down.
+This is a simple Sports News Service that continously montiors latest ECB articles, persists them and exposes REST API that can be used for analytics or when the ECB server is down. The API also can be furthure extended to standardise news articles across different providers for upstream apps consumption.
 
 
 ## Functional requirements
