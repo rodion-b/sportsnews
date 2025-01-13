@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"sports-news-api/internal/app/utils"
 
 	"github.com/gorilla/mux"
 )
@@ -22,14 +23,14 @@ func (s Server) GetArticleById(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	articleId := vars["article_id"]
 
-	if articleId == "" {
-		RespondWithFailure("Missing article_id in request", http.StatusBadRequest, w, r)
-		return
-	}
-
 	result, err := s.articlesService.GetEcbArticleById(r.Context(), articleId)
 	if err != nil {
-		RespondWithError(fmt.Sprintf("Error getting article by id: %v", err), http.StatusInternalServerError, w, r)
+		if err == utils.ErrNotFound {
+			RespondWithFailure("Article with such id is missing", http.StatusBadRequest, w, r)
+		} else {
+			RespondWithError(fmt.Sprintf("Error getting article by id: %v", err), http.StatusInternalServerError, w, r)
+		}
+
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sports-news-api/internal/app/models"
+	"sports-news-api/internal/app/utils"
 
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
@@ -50,14 +51,17 @@ func (r ArticlesRepo) GetEcbArticleById(ctx context.Context, id string) (interfa
 	var result bson.M
 	err = r.db.Collection(articles).FindOne(ctx, bson.M{"_id": objectID}).Decode(&result)
 	if err != nil {
-		return nil, fmt.Errorf("error finding document: %v", err)
+		if err == mongo.ErrNoDocuments {
+			return nil, utils.ErrNotFound
+		}
+		return nil, fmt.Errorf("error finding document: %v", err) // other database error
 	}
 
 	return result, nil
 }
 
 func (r ArticlesRepo) GetAllEcbArticles(ctx context.Context, limit int64) ([]interface{}, error) {
-	// Create find options to limit results and sort by lastModified descending
+	// Create find options to limit results
 	findOptions := options.Find()
 	findOptions.SetLimit(limit) //setting limit to the number of articles to return
 

@@ -96,21 +96,6 @@ func TestGetArticleById_Success(t *testing.T) {
 	assert.Equal(t, expectedArticle, response.Data)
 }
 
-func TestGetArticleById_MissingArticleId(t *testing.T) {
-	server := newTestServer()
-
-	req := httptest.NewRequest(http.MethodGet, "/articles/", nil)
-	rec := httptest.NewRecorder()
-
-	server.GetArticleById(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	var response FailureResponse
-	_ = json.NewDecoder(rec.Body).Decode(&response)
-	assert.Equal(t, "fail", response.Status)
-	assert.Equal(t, "Missing article_id in request", response.Data)
-}
-
 func TestGetArticleById_Error(t *testing.T) {
 	mockService := &MockArticlesService{}
 	server := Server{articlesService: mockService}
