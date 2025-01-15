@@ -50,7 +50,7 @@ func (s Server) GetArticleById(w http.ResponseWriter, r *http.Request) {
 func (s Server) GetAllArticles(w http.ResponseWriter, r *http.Request) {
 	clientId := r.URL.Query().Get("clientId")
 	offset := r.URL.Query().Get("offset")
-	var defaultQueryLimit int64 = 100
+	limit := r.URL.Query().Get("limit")
 
 	var offsetInt int64 = 0
 	if offset != "" {
@@ -61,7 +61,18 @@ func (s Server) GetAllArticles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	articles, err := s.articlesService.GetAllArticles(r.Context(), clientId, defaultQueryLimit, offsetInt)
+
+	var limitInt int64 = 0
+	if limit != "" {
+		var err error
+		limitInt, err = strconv.ParseInt(limit, 10, 64)
+		if err != nil {
+			RespondWithFailure(fmt.Sprintf("invalid limit value: %v", err), http.StatusBadRequest, w, r)
+			return
+		}
+	}
+
+	articles, err := s.articlesService.GetAllArticles(r.Context(), clientId, limitInt, offsetInt)
 	if err != nil {
 		RespondWithError(fmt.Sprintf("error getting articles: %v", err), http.StatusInternalServerError, w, r)
 		return

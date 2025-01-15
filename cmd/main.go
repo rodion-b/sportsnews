@@ -25,6 +25,7 @@ const ecbArticlesPollSize = 5
 const ecbFeedsRequestsTimeout = time.Second * 5
 const ecbHost = "content-ecb.pulselive.com"
 const ecbPath = "content/ecb/text/EN/"
+const articlesTTLSeconds = 86400
 
 func main() {
 	if err := run(); err != nil {
@@ -57,12 +58,13 @@ func run() error {
 	}
 	log.Info().Msg("Successfully connected to DB")
 
-	// Create a TTL index for articles collection
+	// Createing TTL index for articles collection
+	articles := client.Database(cfg.MONGO_DATABASE_NAME).Collection(repository.ArticlesCollection)
 	indexModel := mongo.IndexModel{
-		Keys:    bson.M{"createdAt": 1},                       // Field to index
-		Options: options.Index().SetExpireAfterSeconds(86400), // TTL index expires after 24 hours (3600 seconds)
+		Keys:    bson.M{"createdAt": 1},                                    // Field to index
+		Options: options.Index().SetExpireAfterSeconds(articlesTTLSeconds), // TTL index expires after
 	}
-	_, err = client.Database(cfg.MONGO_DATABASE_NAME).Collection(repository.ArticlesCollection).Indexes().CreateOne(ctx, indexModel)
+	_, err = articles.Indexes().CreateOne(ctx, indexModel)
 	if err != nil {
 		return fmt.Errorf("error creating TTL index: %v", err)
 	}
