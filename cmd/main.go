@@ -10,12 +10,12 @@ import (
 	"sports-news-api/internal/app/repository"
 	"sports-news-api/internal/app/server"
 	"sports-news-api/internal/app/services"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -23,6 +23,8 @@ import (
 const refreshFrequency = time.Second * 10
 const ecbArticlesPollSize = 5
 const ecbFeedsRequestsTimeout = time.Second * 5
+const ecbHost = "content-ecb.pulselive.com"
+const ecbPath = "content/ecb/text/EN/"
 
 func main() {
 	if err := run(); err != nil {
@@ -35,7 +37,7 @@ func run() error {
 	// read config from env
 	cfg, err := config.Read()
 	if err != nil {
-		return err
+		return fmt.Errorf("error reading config: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,57 +46,38 @@ func run() error {
 	clientOptions := options.Client().ApplyURI(cfg.MONGO_URI)
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		log.Err(err).Msg("Error connecting to MongoDB")
-		return err
+		return fmt.Errorf("error connecting to MongoDB: %v", err)
 	}
+	defer client.Disconnect(ctx)
 
 	// Ping to ensure connection is established
 	err = client.Ping(ctx, nil)
 	if err != nil {
-		log.Err(err).Msg("Error pinging MongoDB")
-		return err
+		return fmt.Errorf("error pinging MongoDB: %v", err)
 	}
 	log.Info().Msg("Successfully connected to DB")
 
+	// Create a TTL index for articles collection
+	indexModel := mongo.IndexModel{
+		Keys:    bson.M{"createdAt": 1},                       // Field to index
+		Options: options.Index().SetExpireAfterSeconds(86400), // TTL index expires after 24 hours (3600 seconds)
+	}
+	_, err = client.Database(cfg.MONGO_DATABASE_NAME).Collection(repository.ArticlesCollection).Indexes().CreateOne(ctx, indexModel)
+	if err != nil {
+		return fmt.Errorf("error creating TTL index: %v", err)
+	}
+
 	// Repositories Init
-	articlesRepo := repository.NewArticlesRepo(client.Database(cfg.MONGO_DATABASE_NAME))
+	articlesRepo := repository.NewArticlesRepo(client, cfg.MONGO_DATABASE_NAME)
+
 	// 	Services Init
 	articlesService := services.NewArticlesService(articlesRepo)
 
-	//Polling ECB Articles
-	ecbFeeds := services.NewEcbFeedsService("content-ecb.pulselive.com", "content/ecb/text/EN/", ecbFeedsRequestsTimeout)
-	go func() {
-		ticker := time.NewTicker(refreshFrequency)
-		for {
-			select {
-			case <-ticker.C:
-				//get latest N articles
-				ecbArticles, err := ecbFeeds.GetEcbArticles(ecbArticlesPollSize)
-				if err != nil {
-					log.Err(err).Msg("Unable to GetEcbArticles")
-					continue //skipping the rest
-				}
-				for _, article := range ecbArticles.Content {
-					go func() {
-						//enriching article data
-						articleFull, err := ecbFeeds.GetArticleById(strconv.Itoa(article.ID))
-						if err != nil {
-							log.Err(err).Msg("Unable to GetArticleById")
-							return
-						}
-						//upserting article into db
-						err = articlesService.UpsertEcbArticle(ctx, *articleFull)
-						if err != nil {
-							log.Err(err).Msg("Unable to UpsertEcbArticle")
-							return
-						}
-					}()
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	//ECB Feeds Service Init
+	ecbFeeds := services.NewEcbFeedsService(ecbHost, ecbPath, ecbFeedsRequestsTimeout, articlesService)
+
+	//Starting Pollng ECB Articles
+	go ecbFeeds.PollEcbArticles(ctx, ecbArticlesPollSize, refreshFrequency)
 
 	log.Info().Msg("Successfully started Polling ECB Articles")
 

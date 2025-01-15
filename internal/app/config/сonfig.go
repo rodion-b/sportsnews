@@ -11,7 +11,7 @@ type Config struct {
 	MONGO_DATABASE_NAME string
 }
 
-// Read reads config from environment.
+// Reads config from environment.
 func Read() (*Config, error) {
 	config := Config{}
 	HTTP_ADDR, exists := os.LookupEnv("HTTP_ADDR")

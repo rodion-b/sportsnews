@@ -1,3 +1,3 @@
 package repository
 
-const articles = "articles"
+const ArticlesCollection = "articles"

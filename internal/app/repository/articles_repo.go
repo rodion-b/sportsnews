@@ -2,83 +2,148 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sports-news-api/internal/app/models"
-	"sports-news-api/internal/app/utils"
+	"sports-news-api/internal/app/domain"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type ArticlesRepo struct {
-	db *mongo.Database
+	client *mongo.Client
+	dbName string
 }
 
-func NewArticlesRepo(db *mongo.Database) *ArticlesRepo {
-	return &ArticlesRepo{db: db}
+func NewArticlesRepo(client *mongo.Client, dbName string) *ArticlesRepo {
+	return &ArticlesRepo{client: client, dbName: dbName}
 }
 
-func (r ArticlesRepo) UpsertEcbArticle(ctx context.Context, ecbArticle models.EcbArticle) error {
-	filter := bson.M{
-		"id": ecbArticle.ID, // assuming `ID` is a field in GetEcbArticleResponse
+/*
+If article already exists in the database we check if lastmodifed date is old and update the article
+If article doesnt exist we insert new one
+*/
+func (r ArticlesRepo) UpsertArticle(ctx context.Context, article domain.Article) error {
+
+	articlesCollection := r.client.Database(r.dbName).Collection(ArticlesCollection)
+
+	var existingAritcle Article
+	err := articlesCollection.FindOne(ctx, bson.M{"clientArticleId": article.ClientArticleId()}).Decode(&existingAritcle)
+
+	//if not documents found insert one
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		//inserting one
+		repoArticle := bson.M{
+			"_id":             article.ID(),
+			"clientId":        article.ClientID(),
+			"clientArticleId": article.ClientArticleId(),
+			"title":           article.Title(),
+			"content":         article.Content(),
+			"lastModified":    article.LastModified(),
+			"publishDate":     article.PublishDate(),
+			"createdAt":       time.Now(), //For TTl
+		}
+		res, err := articlesCollection.InsertOne(ctx, repoArticle)
+		if err != nil {
+			return fmt.Errorf("error inserting new document: %v", err)
+		}
+		log.Info().Msg(fmt.Sprintf("Successfully inserted new article into database %v", res.InsertedID))
+		return nil
 	}
 
-	update := bson.M{
-		"$set": ecbArticle, // updates or inserts with the entire struct
-	}
-
-	// Perform the upsert operation
-	_, err := r.db.Collection(articles).UpdateOne(ctx, filter, update, options.Update().SetUpsert(true))
 	if err != nil {
-		return fmt.Errorf("failed to upsert article: %v", err)
+		return fmt.Errorf("error finding document: %v", err)
 	}
 
-	log.Info().Msg(fmt.Sprintf("Successfully upserted article with ID: %d", ecbArticle.ID))
+	//If Article exists and lastmodifed is different we update the article
+	if article.LastModified() > existingAritcle.LastModified {
+		updateFields := bson.M{
+			"title":        article.Title(),
+			"content":      article.Content(),
+			"lastModified": article.LastModified(),
+			"publishDate":  article.PublishDate(),
+		}
+		res, err := articlesCollection.UpdateOne(ctx, bson.M{"_id": existingAritcle.Id}, updateFields)
+		if err != nil {
+			return fmt.Errorf("error updating document: %v", err)
+		}
+		log.Info().Msg(fmt.Sprintf("Successfully updated article in the database %v", res.UpsertedID))
+	}
 
 	return nil
 }
 
-func (r ArticlesRepo) GetEcbArticleById(ctx context.Context, id string) (interface{}, error) {
+// A function to get article by id
+func (r ArticlesRepo) GetArticleById(ctx context.Context, id string, clientId string) (*domain.Article, error) {
 
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, fmt.Errorf("invalid ID format: %v", err)
-	}
+	articlesCollection := r.client.Database(r.dbName).Collection(ArticlesCollection)
 
-	var result bson.M
-	err = r.db.Collection(articles).FindOne(ctx, bson.M{"_id": objectID}).Decode(&result)
+	var aritcle Article
+	err := articlesCollection.FindOne(ctx, bson.M{"_id": id, "clientId": clientId}).Decode(&aritcle)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, utils.ErrNotFound
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("error finding document: %v", err) // other database error
 	}
 
-	return result, nil
+	//converting to domain article
+	domainArticle, err := domain.NewArticle(
+		aritcle.Id,
+		aritcle.ClientId,
+		aritcle.ClientArticleId,
+		aritcle.Title,
+		aritcle.Content,
+		aritcle.LastModified,
+		aritcle.PublishDate,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to covert to domain article %v", err)
+	}
+
+	return domainArticle, nil
 }
 
-func (r ArticlesRepo) GetAllEcbArticles(ctx context.Context, limit int64) ([]interface{}, error) {
+// A function to get all articles
+func (r ArticlesRepo) GetAllArticles(ctx context.Context, clientId string, limit int64, offset int64) ([]*domain.Article, error) {
+	articlesCollection := r.client.Database(r.dbName).Collection(ArticlesCollection)
+
 	// Create find options to limit results
 	findOptions := options.Find()
 	findOptions.SetLimit(limit) //setting limit to the number of articles to return
+	findOptions.SetSkip(offset) // Setting offset to skip the specified number of articles
 
 	// Finding documents
-	cursor, err := r.db.Collection(articles).Find(ctx, bson.M{}, findOptions)
+	cursor, err := articlesCollection.Find(ctx, bson.M{"clientId": clientId}, findOptions)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching documents: %v", err)
 	}
 	defer cursor.Close(ctx)
 
-	var results []interface{}
+	var articles []*domain.Article
 	for cursor.Next(ctx) {
-		var article bson.M
+		var article Article
 		if err := cursor.Decode(&article); err != nil {
 			return nil, fmt.Errorf("error decoding document: %v", err)
 		}
-		results = append(results, article)
+
+		domainArticle, err := domain.NewArticle(
+			article.Id,
+			article.ClientId,
+			article.ClientArticleId,
+			article.Title,
+			article.Content,
+			article.LastModified,
+			article.PublishDate,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to covert to domain article %v", err)
+		}
+
+		articles = append(articles, domainArticle)
 	}
 
 	// Check for cursor errors after the loop
@@ -86,5 +151,5 @@ func (r ArticlesRepo) GetAllEcbArticles(ctx context.Context, limit int64) ([]int
 		return nil, fmt.Errorf("error iterating cursor: %v", err)
 	}
 
-	return results, nil
+	return articles, nil
 }

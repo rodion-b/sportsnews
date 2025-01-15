@@ -38,3 +38,8 @@ This is a simple Sports News Service that continously montiors latest ECB articl
 - simple server test is included
 - App doesnt cleanup historical data from the db as I belive that can be easier achieved on database side with TTLs set up
 
+
+## To clarify
+-   As there are a lot of information coming from ecb endpoint - can you clarify what desirable format i should convert the data for upstream apps consumption?
+-  Can you clarify "Implement reasonable limits to manage historical data efficiently"? 
+  At the moment I am saving articles into mongodb and historical data can be removed automatically with setting up documnets TTLs on mongodb side. Or should I implement extra service that is cleaning up articles that are for example older than 1 year?

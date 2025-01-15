@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-type EcbArticle struct {
+type GetEcbArticleResponse struct {
 	ID          int       `json:"id"`
 	AccountID   int       `json:"accountId"`
 	Type        string    `json:"type"`
